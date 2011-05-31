@@ -1,2 +1,6 @@
-Project: growth
+growth.py - Self-sustaining Python Network
+
+growth.py is the application that exists as one node in one large network
+of little Python agents.
+
 2011 GPL
