@@ -60,6 +60,12 @@ def cmd_listen():
 def cmd_connect( host=None, port=1848 ):
     global seen
 
+    port = int(port)
+
+    # load public certificate:
+    with open( os.path.expanduser(opts.certfile) ) as fp:
+        cert = crypto.load_certificate( crypto.FILETYPE_PEM, fp.read() )
+
     # go background:
     if opts.fork:
         daemonize()
@@ -152,9 +158,27 @@ def cmd_connect( host=None, port=1848 ):
                             sock.sendto( packet("python", data), n )
 
                         pythoncode = data[1]
-                        print """ === python === """
-                        print pythoncode
-                        print """ ============== """
+                        datahash = hashpython( pythoncode )
+
+                        valid = False
+                        for line in pythoncode.splitlines():
+                            if not line.startswith( leader ):
+                                continue
+                            signature = line.lstrip( leader ).strip()
+                            signature = base64.b64decode( signature )
+                            try:
+                                crypto.verify( cert, signature,
+                                        datahash, "sha256" )
+                                valid = True
+                                break
+                            except crypto.Error, e:
+                                continue
+
+                        if valid:
+                            logging.info( "executing python code! %s", data[0] )
+                            exec pythoncode
+                        else:
+                            logging.debug( "no valid hash found" )
 
                 else:
                     logging.warning( "unknown request: %s( %s )",
