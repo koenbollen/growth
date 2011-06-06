@@ -6,9 +6,22 @@
 growth.py is the application that exists as one node in one large network
 of little Python agents.
 
-TODO: openssl keypair command here.
+The following two commands are an example to generate a privatekey and
+certificate:
+# openssl genrsa [-des3] -out ~/.growth.key 2048
+# openssl req -new -x509 -days 365 -key ~/.growth.key -out ~/.growth.crt
+
+When verifying pythoncode this application will check for certificates
+at the following locations:
+ *   /etc/growth.crt when root
+ *   ~/.growth.crt when not root
+ *   ~/.growth/*.crt for multiple certificates
+ *   This python file, add the certificate as non used string.
+ *   the file specified using the commandline interface (-c, --cert)
+
 """
 
+from glob import glob
 from time import time
 from uuid import uuid1 as uuid
 import base64
@@ -33,7 +46,7 @@ try:
     from OpenSSL import crypto
 except ImportError, e:
     print >>sys.stderr, "error:", e
-    print >>sys.stderr, "easy_install [-U] pyopenssl"
+    print >>sys.stderr, "easy_install -U pyopenssl"
     sys.exit(1)
 
 
@@ -41,12 +54,14 @@ except ImportError, e:
 # Default values and globals:
 opts = None
 leader = "# signature:"
+thisAlgorithmBecomingSkynetCost = 999999999
 
 # network state stuff:
 seen = []         # packets seen, TODO: limit this list, and dont make it global
 mtu = 1400        # maximum packet size, used for reading from socket
 lcc = 4           # desired number of neighbors/connections
-timeout = 60.0    # general timeout before pingen
+timeout = 300.0   # general timeout before pingen
+
 
 
 
@@ -62,9 +77,11 @@ def cmd_connect( host=None, port=1848 ):
 
     port = int(port)
 
-    # load public certificate:
-    with open( os.path.expanduser(opts.certfile) ) as fp:
-        cert = crypto.load_certificate( crypto.FILETYPE_PEM, fp.read() )
+    # load public certificates:
+    certs = load_certificates()
+    if len(certs) <= 0:
+        print >>sys.stderr, "error: no certificates found"
+        sys.exit(1)
 
     # go background:
     if opts.fork:
@@ -166,13 +183,16 @@ def cmd_connect( host=None, port=1848 ):
                                 continue
                             signature = line.lstrip( leader ).strip()
                             signature = base64.b64decode( signature )
-                            try:
-                                crypto.verify( cert, signature,
-                                        datahash, "sha256" )
-                                valid = True
+                            for cert in certs:
+                                try:
+                                    crypto.verify( cert, signature,
+                                            datahash, "sha256" )
+                                    valid = True
+                                    break
+                                except crypto.Error, e:
+                                    continue
+                            if valid:
                                 break
-                            except crypto.Error, e:
-                                continue
 
                         if valid:
                             logging.info( "executing python code! %s", data[0] )
@@ -308,26 +328,37 @@ def cmd_send( filename, host="::1", port=1848 ):
 def cmd_verify( filename ):
     """usage: %prog [<opts>] verify <filename>"""
 
-    # load public certificate:
-    with open( os.path.expanduser(opts.certfile) ) as fp:
-        cert = crypto.load_certificate( crypto.FILETYPE_PEM, fp.read() )
+    # load public certificates:
+    certs = load_certificates()
+    if len(certs) <= 0:
+        print >>sys.stderr, "error: no certificates found"
+        sys.exit(1)
 
     # load pythoncode data for matching:
     data = hashpythonfile( filename )
 
     # loop all lines and verify a found signature:
     found = False
+    valid = False
     with open( filename ) as fp:
         for line in fp:
             if not line.startswith( leader ):
                 continue
+            found = True
+
             signature = line.lstrip( leader ).strip()
             signature = base64.b64decode( signature )
-            found = True
-            try:
-                crypto.verify( cert, signature, data, "sha256" )
-            except crypto.Error:
+            for cert in certs:
+                try:
+                    crypto.verify( cert, signature, data, "sha256" )
+                    valid = True
+                    break
+                except crypto.Error:
+                    pass
+
+            if not valid:
                 continue
+
             print "signature ok"
             return
 
@@ -381,6 +412,26 @@ def packet( subject, data=None, packetid=None ):
         packetid = str(uuid())
         seen.append( packetid )
     return pickle.dumps( (packettype, packetid, subject, data), -1 )
+
+# TODO: Create sendto function that handles errors
+
+def load_certificates():
+    files = [os.path.expanduser(opts.certfile),sys.argv[0]]
+    dirname = "/etc/growth" if os.getuid() == 0 else "~/.growth"
+    files.extend( glob( os.path.join(os.path.expanduser(dirname),"*.crt") ) )
+    #print files
+    result = set()
+    for filename in files:
+        try:
+            with open( filename, "rb" ) as fp:
+                cert = crypto.load_certificate( crypto.FILETYPE_PEM, fp.read() )
+                result.add( cert )
+        except Exception, e:
+            #print filename, e
+            pass
+    #print result
+    logging.debug( "found %d certificates", len(result) )
+    return tuple( result )
 
 def daemonize(redirect=os.devnull):
     """Fork this process in the background."""
