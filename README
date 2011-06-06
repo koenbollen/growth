@@ -3,4 +3,19 @@ growth.py - Self-sustaining Python Network
 growth.py is the application that exists as one node in one large network
 of little Python agents.
 
+growth.py is the service and toolkit for creating a self-sustaining network
+of Python nodes without a central server or a command&control-channel. This
+is an IPv6-only project due to problems surrounding NAT, routing and firewalls,
+also this was started as a demo for the IPv6Day in Holland.
+
+With such a network, full of growth.py nodes, you able to create a python job
+or python file, sign it with your private key (and let friends sign it with
+theirs) and send it into the network. Every node will receive this python file,
+but only the those who can verify it with a stored public certificate will
+execute them. Now, this is were things gets interesting; You can create
+distributed computing tasks, or launch a large DDOS attack. It's even possible
+to create a self-updater job (code included). Every thing that the programming
+language Python can do is now done distributed.
+
+Koen Bollen <meneer koenbollen nl>
 2011 GPL

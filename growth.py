@@ -1,24 +1,52 @@
 #!/usr/bin/env python
 # growth.py - Self-sustaining Python Network
-#
+#             Koen Bollen <meneer koenbollen nl>
+#             2011 GPL
 
 """
 growth.py is the application that exists as one node in one large network
 of little Python agents.
 
-The following two commands are an example to generate a privatekey and
-certificate:
+growth.py is the service and toolkit for creating a self-sustaining network
+of Python nodes without a central server or a command&control-channel. This
+is an IPv6-only project due to problems surrounding NAT, routing and firewalls,
+also this was started as a demo for the IPv6Day in Holland.
+
+With such a network, full of growth.py nodes, you able to create a python job
+or python file, sign it with your private key (and let friends sign it with
+theirs) and send it into the network. Every node will receive this python file,
+but only the those who can verify it with a stored public certificate will
+execute them. Now, this is were things gets interesting; You can create
+distributed computing tasks, or launch a large DDOS attack. It's even possible
+to create a self-updater job (code included). Every thing that the programming
+language Python can do is now done distributed.
+
+
+This application have the follow commands available:
+ *   sign    - used to sign a Python file.
+ *   verify  - will manually verify a Python file.
+ *   connect - the main command to start a growth.py node, this command
+               will start the Python service that joins the network.
+               this service will manage connections with the network
+               and it waits for incoming Python files to execute. When
+               a file is received it is verified with the public certificates
+               in memory loaded at startup.
+ *   send    - this command can send a Python file into an existing
+               network, only if the file is signed with a key matching
+               a node's certificate will it be executed.
+
+The following two openssl commands are an example to generate a private key
+and a certificate:
 # openssl genrsa [-des3] -out ~/.growth.key 2048
 # openssl req -new -x509 -days 365 -key ~/.growth.key -out ~/.growth.crt
 
-When verifying pythoncode this application will check for certificates
+When verifying python code this application will check for certificates
 at the following locations:
  *   /etc/growth.crt when root
- *   ~/.growth.crt when not root
+ *   ~/.growth.crt
  *   ~/.growth/*.crt for multiple certificates
  *   This python file, add the certificate as non used string.
- *   the file specified using the commandline interface (-c, --cert)
-
+ *   the file specified using the command-line-interface (-c, --cert)
 """
 
 from glob import glob
@@ -71,7 +99,7 @@ timeout = 300.0   # general timeout before pingen
 # command functions:
 
 def cmd_listen():
-    """usage: %prog [<opts>] listen [-f]"""
+    """usage: %prog [<opts>] listen [-f] (alias for connect)"""
     return cmd_connect()
 
 def cmd_connect( host=None, port=1848 ):
@@ -322,7 +350,7 @@ def cmd_connect( host=None, port=1848 ):
 
 
 def cmd_send( filename, host="::1", port=1848 ):
-    """usage: todo"""
+    """usage: %prog [<opts>] send <signed-file>"""
 
     s = socket.socket( socket.AF_INET6, socket.SOCK_DGRAM )
     with open( filename ) as fp:
@@ -444,8 +472,10 @@ def sendto(sock, data, address ):
 def load_certificates():
     """Load all certificates that can be found."""
     files = [os.path.expanduser(opts.certfile),sys.argv[0]]
-    dirname = "/etc/growth" if os.getuid() == 0 else "~/.growth"
-    files.extend( glob( os.path.join(os.path.expanduser(dirname),"*.crt") ) )
+    files.extend(glob(os.path.join(os.path.expanduser("~/.growth"),"*.crt")))
+    if os.getuid() == 0:
+        files.append( "/etc/growth.crt" )
+        files.extend(glob(os.path.join(os.path.expanduser("/etc/growth"),"*.crt")))
     #print files
     result = set()
     for filename in files:
@@ -491,23 +521,29 @@ def main():
     prog = os.path.basename(sys.argv[0])
     parser = optparse.OptionParser(
             usage="%prog [<opts>] <cmd> <args...>",
-            description=__doc__
+            description=__doc__.split("\n\n")[0] # first paragraph.
         )
+    parser.add_option( "--long-help", dest="longhelp", default=False,
+            action="store_true", help="display a long help text and exit." )
     parser.add_option( "-k", "--key", dest="keyfile", default="~/.growth.key",
-            help="The private key vor signing python code", metavar="FILE" )
+            help="the private key vor signing python code", metavar="FILE" )
     parser.add_option( "-c","--cert", dest="certfile", default="~/.growth.crt",
-            help="The certificate for verifing python code", metavar="FILE" )
+            help="certificate for verifing python code", metavar="FILE" )
     parser.add_option( "-f", "--nofork", dest="fork", default=True,
-            action="store_false", help="Don't fork progress into background" )
+            action="store_false", help="don't fork progress into background" )
     parser.add_option( "-l", "--listen", dest="listenport", default=1848,
-            type="int", help="The port to listen on (cmd == listen)" )
+            type="int", help="the port to listen on (cmd == listen)" )
     parser.add_option( "-d", "--debug", dest="debug", default=False,
-            action="store_true", help="So debugging information, implies -f" )
+            action="store_true", help="so debugging information, implies -f" )
     parser.add_option( "-L", "--logconfig", dest="logconfig", default=None,
-            help="Load logging configuration from this file, see "
+            help="load logging configuration from this file, see "
             +"http://docs.python.org/library/logging.config.html",
             metavar="FILE" )
     (opts, args) = parser.parse_args()
+
+    if opts.longhelp:
+        print __doc__
+        sys.exit(0)
 
     if len(args) < 1:
         parser.print_help()
