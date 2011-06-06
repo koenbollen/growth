@@ -140,17 +140,18 @@ def cmd_connect( host=None, port=1848 ):
                     sendto(sock, packet("pong", now, packetid), addr )
 
                 elif subject == "helo":
-                    if addr not in network:
-                        if len(network) < lcc:
-                            pkt = packet("welcome", set(network), packetid)
-                            sendto(sock,pkt,addr)
-                            network[addr] = now
-                            logging.info( "received helo and accepted: %s:%d",
-                                    addr[0], addr[1] )
-                        else:
-                            sendto(sock, packet("go away", set(network),
-                                packetid), addr)
-                            logging.debug( "received helo and refused" )
+                    if addr in network: # a reconnect
+                        del network[addr]
+                    if len(network) < lcc:
+                        pkt = packet("welcome", set(network), packetid)
+                        sendto(sock,pkt,addr)
+                        network[addr] = now
+                        logging.info( "received helo and accepted: %s:%d",
+                                addr[0], addr[1] )
+                    else:
+                        sendto(sock, packet("go away", set(network),
+                            packetid), addr)
+                        logging.debug( "received helo and refused" )
 
                 elif subject == "rewire" and data in network:
                     sendto(sock,packet("kill", addr),data)
