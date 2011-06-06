@@ -30,6 +30,7 @@ import cPickle as pickle
 import hashlib
 import inspect
 import logging
+import logging.config
 import marshal
 import optparse
 import os
@@ -91,7 +92,6 @@ def cmd_connect( host=None, port=1848 ):
     # create listen socket:
     try:
         sock = socket.socket( socket.AF_INET6, socket.SOCK_DGRAM )
-        sock.setsockopt( socket.SOL_SOCKET, socket.SO_REUSEADDR, 1 )
         sock.bind( ('', opts.listenport) )
     except socket.error, e:
         print >>sys.stderr, "error:", e
@@ -493,11 +493,25 @@ def main():
             action="store_false", help="Don't fork progress into background" )
     parser.add_option( "-l", "--listen", dest="listenport", default=1848,
             type="int", help="The port to listen on (cmd == listen)" )
+    parser.add_option( "-d", "--debug", dest="debug", default=False,
+            action="store_true", help="So debugging information, implies -f" )
+    parser.add_option( "-L", "--logconfig", dest="logconfig", default=None,
+            help="Load logging configuration from this file, see "
+            +"http://docs.python.org/library/logging.config.html",
+            metavar="FILE" )
     (opts, args) = parser.parse_args()
 
     if len(args) < 1:
         parser.print_help()
         sys.exit(1)
+
+    if opts.debug:
+        opts.fork = False
+        logging.basicConfig(
+                format="%(levelname)s: %(message)s",
+                level=logging.DEBUG )
+    elif opts.logconfig is not None:
+        logging.config.fileConfig( opts.logconfig )
 
     try:
         cmd = args[0]
@@ -520,9 +534,6 @@ def main():
     if len(args)>1 and args[1] in ("-h", "--help"):
         print >>sys.stderr, func.__doc__.replace( "%prog", prog )
         sys.exit(0)
-
-    # TODO: Setup logging from config or cli
-    logging.basicConfig( level=logging.DEBUG )
 
     try:
         func( *args[1:] )
