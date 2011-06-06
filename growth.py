@@ -24,6 +24,7 @@ at the following locations:
 from glob import glob
 from time import time
 from uuid import uuid1 as uuid
+from StringIO import StringIO
 import base64
 import cPickle as pickle
 import hashlib
@@ -37,6 +38,7 @@ import select
 import socket
 import socket
 import sys
+import traceback
 
 try:
     import OpenSSL
@@ -58,10 +60,9 @@ thisAlgorithmBecomingSkynetCost = 999999999
 
 # network state stuff:
 seen = []         # packets seen, TODO: limit this list, and dont make it global
-mtu = 1400        # maximum packet size, used for reading from socket
+mtu = 24000       # maximum packet size, used for reading from socket
 lcc = 4           # desired number of neighbors/connections
 timeout = 300.0   # general timeout before pingen
-
 
 
 
@@ -90,6 +91,7 @@ def cmd_connect( host=None, port=1848 ):
     # create listen socket:
     try:
         sock = socket.socket( socket.AF_INET6, socket.SOCK_DGRAM )
+        sock.setsockopt( socket.SOL_SOCKET, socket.SO_REUSEADDR, 1 )
         sock.bind( ('', opts.listenport) )
     except socket.error, e:
         print >>sys.stderr, "error:", e
@@ -122,8 +124,8 @@ def cmd_connect( host=None, port=1848 ):
 
             try:
                 packettype, packetid, subject, data = pickle.loads(raw)
-            except (IndexError, ValueError, pickle.UnpicklingError), e:
-                logging.warning( "illegal packet received: %s", e.args[0] )
+            except (EOFError, IndexError, ValueError, pickle.UnpicklingError), e:
+                logging.warning( "illegal packet received: %s", e )
                 continue
             if packettype != "reply" and packetid is seen:
                 continue
@@ -182,7 +184,11 @@ def cmd_connect( host=None, port=1848 ):
                             if not line.startswith( leader ):
                                 continue
                             signature = line.lstrip( leader ).strip()
-                            signature = base64.b64decode( signature )
+                            try:
+                                signature = base64.b64decode( signature )
+                            except TypeError, e:
+                                logging.warning( "base64 error: %s", repr(e) )
+                                continue
                             for cert in certs:
                                 try:
                                     crypto.verify( cert, signature,
@@ -196,7 +202,7 @@ def cmd_connect( host=None, port=1848 ):
 
                         if valid:
                             logging.info( "executing python code! %s", data[0] )
-                            exec pythoncode
+                            execute( pythoncode )
                         else:
                             logging.debug( "no valid hash found" )
 
@@ -394,6 +400,19 @@ def cmd_sign( filename ):
 
 # util functions:
 
+def execute( pythoncode ):
+    try:
+        exec pythoncode
+    except SystemExit:
+        pass
+    except Exception, e:
+        logging.error( "exception while executing: %s", repr(e) )
+        f = StringIO()
+        traceback.print_exc(file=f)
+        logging.debug( "traceback:\n" + f.getvalue() )
+
+
+
 def hashpythonfile( filename ):
     """Compile a python file and hash the code object."""
     with open(filename) as fp:
@@ -433,9 +452,11 @@ def load_certificates():
     logging.debug( "found %d certificates", len(result) )
     return tuple( result )
 
-def daemonize(redirect=os.devnull):
+def daemonize(redirect=os.devnull, dontkill=False):
     """Fork this process in the background."""
     if os.fork() > 0:
+        if dontkill:
+            return
         os._exit(0)
     os.setsid()
     os.chdir("/")
@@ -482,8 +503,8 @@ def main():
         cmd = args[0]
         func = globals()["cmd_"+cmd]
     except KeyError:
-        print >>std.stderr, "error: no such command: " + cmd
-        print >>std.stderr, "'{0} --help' for more info".format(prog)
+        print >>sys.stderr, "error: no such command: " + cmd
+        print >>sys.stderr, "'{0} --help' for more info".format(prog)
         sys.exit(1)
 
     argspec = inspect.getargspec( func )
