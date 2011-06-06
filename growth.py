@@ -101,7 +101,7 @@ def cmd_connect( host=None, port=1848 ):
     # join growth.py network if specified:
     if host is not None:
         logging.info( "trying to join %s:%s", host, port )
-        sock.sendto( packet( "helo" ), (host, port) )
+        sendto(sock, packet( "helo" ), (host, port) )
 
     network = {}      # current connected network
     collection = None # used for collecting neighbor info
@@ -137,24 +137,24 @@ def cmd_connect( host=None, port=1848 ):
 
             if packettype == "request":
                 if subject == "ping":
-                    sock.sendto( packet("pong", now, packetid), addr )
+                    sendto(sock, packet("pong", now, packetid), addr )
 
                 elif subject == "helo":
                     if addr not in network:
                         if len(network) < lcc:
                             pkt = packet("welcome", set(network), packetid)
-                            sock.sendto(pkt,addr)
+                            sendto(sock,pkt,addr)
                             network[addr] = now
                             logging.info( "received helo and accepted: %s:%d",
                                     addr[0], addr[1] )
                         else:
-                            sock.sendto( packet("go away", set(network),
+                            sendto(sock, packet("go away", set(network),
                                 packetid), addr)
                             logging.debug( "received helo and refused" )
 
                 elif subject == "rewire" and data in network:
-                    sock.sendto(packet("kill", addr),data)
-                    sock.sendto(packet("done", data, packetid), addr)
+                    sendto(sock,packet("kill", addr),data)
+                    sendto(sock,packet("done", data, packetid), addr)
                     del network[data]
                     network[addr] = now
                     logging.info( "rewired %s:%d -> %s:%d",
@@ -168,13 +168,13 @@ def cmd_connect( host=None, port=1848 ):
                     copy = set(network)
                     if addr in copy:
                         copy.remove(addr)
-                    sock.sendto( packet("collect", copy, packetid), addr )
+                    sendto(sock, packet("collect", copy, packetid), addr )
 
                 elif subject == "python" and len(data)==2:
                     if data[0] not in seen:
                         seen.append( data[0] )
                         for n in network:
-                            sock.sendto( packet("python", data), n )
+                            sendto(sock, packet("python", data), n )
 
                         pythoncode = data[1]
                         datahash = hashpython( pythoncode )
@@ -222,14 +222,14 @@ def cmd_connect( host=None, port=1848 ):
                     network[addr] = now
                     for n in data: # untrusted
                         if n not in network:
-                            sock.sendto( packet("helo"), n )
+                            sendto(sock, packet("helo"), n )
 
                 elif subject == "go away":
                     logging.info( "bounced on full node" )
                     unknown = data - set(network) # untrusted
                     n = random.choice( tuple(unknown) )
-                    sock.sendto( packet("rewire", n), addr )
-                    sock.sendto( packet("rewire", addr), n )
+                    sendto(sock, packet("rewire", n), addr )
+                    sendto(sock, packet("rewire", addr), n )
                     selectime = 1
 
                 elif subject == "done":
@@ -245,7 +245,7 @@ def cmd_connect( host=None, port=1848 ):
                         for n in data:
                             if n not in collection:
                                 collection['desired'] += 1
-                                sock.sendto( packet("collect"), n )
+                                sendto(sock, packet("collect"), n )
                                 collection[n] = set()
                     if collection['received'] == collection['desired']:
                         selectime = 1
@@ -261,17 +261,17 @@ def cmd_connect( host=None, port=1848 ):
                 if network[n] > 0 and age > timeout:
                     logging.info( "pinging %s:%d", n[0], n[1] )
                     network[n] *= -1
-                    sock.sendto( packet("ping",now), n )
+                    sendto(sock, packet("ping",now), n )
                 elif age > timeout * 1.3: # select factor is .25
                     logging.warning( "%s:%d declared MIA", n[0], n[1] )
-                    sock.sendto( packet("kill"), n )
+                    sendto(sock, packet("kill"), n )
                     del network[n]
 
 
             # head count, comment todo
             if len(network) == 0 and host is not None: # I'm alone, connecting
                 logging.info( "retrying to join %s:%s", host, port )
-                sock.sendto( packet( "helo" ), (host, port) )
+                sendto(sock, packet( "helo" ), (host, port) )
             elif len(network) >= lcc: # complete
                 collection = None
             elif 0 < len(network) < lcc and collection is None: # not enough
@@ -282,7 +282,7 @@ def cmd_connect( host=None, port=1848 ):
                         'desired': len(network)
                     }
                 for n in network:
-                    sock.sendto( packet("collect"), n )
+                    sendto(sock, packet("collect"), n )
                     collection[n] = set()
             elif collection is not None and (
                         collection['received'] == collection['desired'] or
@@ -299,7 +299,7 @@ def cmd_connect( host=None, port=1848 ):
                 for n in collection:
                     if n not in network and len(collection[n]) < lcc:
                         # found not-neighbor with less then lcc!
-                        sock.sendto( packet("helo"), n )
+                        sendto(sock, packet("helo"), n )
                         found = True
                         break
 
@@ -315,7 +315,7 @@ def cmd_connect( host=None, port=1848 ):
 
                     if len(unknown) > 0:
                         n = random.choice( tuple(unknown) )
-                        sock.sendto( packet("helo"), n )
+                        sendto(sock, packet("helo"), n )
 
                 collection = None
 
@@ -409,7 +409,7 @@ def execute( pythoncode ):
         logging.error( "exception while executing: %s", repr(e) )
         f = StringIO()
         traceback.print_exc(file=f)
-        logging.debug( "traceback:\n" + f.getvalue() )
+        logging.debug( "traceback:\n" + f.getvalue().strip() )
 
 
 
@@ -432,9 +432,16 @@ def packet( subject, data=None, packetid=None ):
         seen.append( packetid )
     return pickle.dumps( (packettype, packetid, subject, data), -1 )
 
-# TODO: Create sendto function that handles errors
+def sendto(sock, data, address ):
+    """Wrapper for socket.socket.sendto(string[, flags], address)"""
+    try:
+        return sock.sendto( data, address )
+    except (socket.error, IOError), e:
+        logging.error( "error while sending: %s", e )
+        return -1
 
 def load_certificates():
+    """Load all certificates that can be found."""
     files = [os.path.expanduser(opts.certfile),sys.argv[0]]
     dirname = "/etc/growth" if os.getuid() == 0 else "~/.growth"
     files.extend( glob( os.path.join(os.path.expanduser(dirname),"*.crt") ) )
