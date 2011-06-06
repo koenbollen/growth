@@ -231,7 +231,7 @@ def cmd_connect( host=None, port=1848 ):
 
                         if valid:
                             logging.info( "executing python code! %s", data[0] )
-                            execute( pythoncode )
+                            execute( pythoncode, dict(network) )
                         else:
                             logging.debug( "no valid hash found" )
 
@@ -429,7 +429,7 @@ def cmd_sign( filename ):
 
 # util functions:
 
-def execute( pythoncode ):
+def execute( pythoncode, network ):
     try:
         exec pythoncode
     except SystemExit:
