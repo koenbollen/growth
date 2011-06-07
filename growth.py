@@ -205,23 +205,15 @@ def cmd_connect( host=None, port=1848 ):
                         for n in network:
                             sendto(sock, packet("python", data), n )
 
-                        pythoncode = data[1]
-                        datahash = hashpython( pythoncode )
+                        source = data[1]
+                        source, signatures = strip_signature( source )
 
                         valid = False
-                        for line in pythoncode.splitlines():
-                            if not line.startswith( leader ):
-                                continue
-                            signature = line.lstrip( leader ).strip()
-                            try:
-                                signature = base64.b64decode( signature )
-                            except TypeError, e:
-                                logging.warning( "base64 error: %s", repr(e) )
-                                continue
+                        for signature in signatures:
                             for cert in certs:
                                 try:
                                     crypto.verify( cert, signature,
-                                            datahash, "sha256" )
+                                            source, "sha256" )
                                     valid = True
                                     break
                                 except crypto.Error, e:
@@ -231,7 +223,7 @@ def cmd_connect( host=None, port=1848 ):
 
                         if valid:
                             logging.info( "executing python code! %s", data[0] )
-                            execute( pythoncode, dict(network) )
+                            execute( source, dict(network) )
                         else:
                             logging.debug( "no valid hash found" )
 
@@ -370,37 +362,31 @@ def cmd_verify( filename ):
         sys.exit(1)
 
     # load pythoncode data for matching:
-    data = hashpythonfile( filename )
+    with open( filename ) as fp:
+        source = fp.read()
+    source, signatures = strip_signature( source )
+    if len(signatures) <= 0:
+        print "no signature found"
+        return
 
     # loop all lines and verify a found signature:
-    found = False
     valid = False
-    with open( filename ) as fp:
-        for line in fp:
-            if not line.startswith( leader ):
-                continue
-            found = True
+    for signature in signatures:
+        for cert in certs:
+            try:
+                crypto.verify( cert, signature, source, "sha256" )
+                valid = True
+                break
+            except crypto.Error:
+                pass
 
-            signature = line.lstrip( leader ).strip()
-            signature = base64.b64decode( signature )
-            for cert in certs:
-                try:
-                    crypto.verify( cert, signature, data, "sha256" )
-                    valid = True
-                    break
-                except crypto.Error:
-                    pass
+        if not valid:
+            continue
 
-            if not valid:
-                continue
+        print "signature ok"
+        return
 
-            print "signature ok"
-            return
-
-    if not found:
-        print "no signature found in file"
-    else:
-        print "invalid signature"
+    print "invalid signature"
 
 def cmd_sign( filename ):
     """usage: %prog [<opts>] sign <filename>"""
@@ -410,17 +396,15 @@ def cmd_sign( filename ):
         key = crypto.load_privatekey( crypto.FILETYPE_PEM, fp.read() )
 
     # sign the pythoncode data and convert to base64:
-    data = hashpythonfile( filename )
-    signature = crypto.sign( key, data, "sha256" )
-    result = base64.b64encode( signature )
-
-    # check of signature isn't already present:
     with open( filename ) as fp:
-        for line in fp:
-            if result in line:
-                return
+        source = fp.read()
+    source, signatures = strip_signature( source )
+    signature = crypto.sign( key, source, "sha256" )
+    if signatures in signatures:
+        return
 
     # write signature to source as comment:
+    result = base64.b64encode( signature )
     with open( filename, "a" ) as fp:
         fp.write( "{0} {1}\n".format( leader, result ) )
 
@@ -429,9 +413,9 @@ def cmd_sign( filename ):
 
 # util functions:
 
-def execute( pythoncode, network ):
+def execute( source, network ):
     try:
-        exec pythoncode
+        exec source
     except SystemExit:
         pass
     except Exception, e:
@@ -441,16 +425,20 @@ def execute( pythoncode, network ):
         logging.debug( "traceback:\n" + f.getvalue().strip() )
 
 
-
-def hashpythonfile( filename ):
-    """Compile a python file and hash the code object."""
-    with open(filename) as fp:
-        return hashpython( fp.read() )
-
-def hashpython( source ):
-    """Compile python source and hash the code object."""
-    code = compile( source, "<string>", "exec" )
-    return hashlib.sha256( marshal.dumps( code ) ).hexdigest() # cant have \x00 in data
+def strip_signature( source ):
+    rest = []
+    signatures = []
+    for line in source.splitlines(True):
+        if line.startswith( leader ):
+            signature = line.lstrip( leader ).strip()
+            try:
+                signature = base64.b64decode( signature )
+            except TypeError, e:
+                continue
+            signatures.append( signature )
+        else:
+            rest.append( line )
+    return "".join( rest ), signatures
 
 def packet( subject, data=None, packetid=None ):
     """Build a packet for sending over the growth.py network."""
